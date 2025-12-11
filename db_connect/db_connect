@@ -28,6 +28,22 @@ function install_error() {
   echo "\`$1\` is not installed, install from ${install_map[$1]}"
 }
 
+help() {
+  echo "
+db_connect: keep connection configuration and connect to databases throug network
+commands:
+  init           : create config file [$CONFIG_FILE]
+  add            : add config
+  show [name]    : show while config or [name]
+  delete {name}  : remove the {name} from config
+  connect {name} : connect to database defined in {name}
+  completion     : print bash completion
+  help           : print this message and exit
+supported databases: ${!PORT_MAP[*]}
+supported tools: ${COMMAND_MAP[*]}
+"
+}
+
 function bash_completion() {
   # shellcheck disable=SC2016
   echo '_complete_db_connect() {
@@ -41,13 +57,14 @@ function bash_completion() {
     [delete]=1
     [connect]=1
     [completion]=1
+    [help]=1
   )
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   if [ "${COMP_CWORD}" -eq "1" ]; then
     readarray -t COMPREPLY <<< "$(compgen -W "${!commands[*]}" -- "${COMP_WORDS[1]}")"
   elif [ "${COMP_CWORD}" -eq "2" ]
   then
-      if ! [ "${commands[${prev}]}" ] || [ "${prev}" == "init" ]
+      if ! [ "${commands[${prev}]}" ] || [ "${prev}" == "init" ] || [ "${prev}" == "help" ]
       then
         return
       else
@@ -209,7 +226,13 @@ connect)
   shift
   connect "$@"
   ;;
+'-h' | '--help' | 'help')
+  help
+  exit
+  ;;
 *)
   echo -e "\n\033[01;31mError. Command not valid. Valid values are {init|completion|show|add|delete|connect}\033[00m\n"
+  help
+  exit 1
   ;;
 esac
