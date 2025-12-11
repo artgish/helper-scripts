@@ -92,8 +92,12 @@ function add_config() {
   if [ "${is_srv}" != 'no' ] && [ "${is_srv}" != "yes" ]; then
     is_srv='no'
   fi
-  read -rp "Database port [default: ${default_port}]: " port
-  port="${port:-$default_port}"
+  if [ "${is_srv}" == "no" ]; then
+    read -rp "Database port [default: ${default_port}]: " port
+    port="${port:-$default_port}"
+  else
+    port=""
+  fi
   read -rp "Database user: " user
   : "${user:?Database user must be set}"
   read -rp "Connect database name: " db
@@ -167,14 +171,14 @@ function connect() {
   mongodb)
     cmd="mongosh"
     if [ "$is_srv" == 'yes' ]; then
-      cmd+=" mongodb+srv://"
+      cmd+=" mongodb+srv://$user:$pass@$host/"
     else
-      cmd+=" mongodb://"
+      cmd+=" mongodb://$user:$pass:$host:$port/"
     fi
-    cmd+="$user:$pass@$host:$port/"
     if [ "${db}" != 'USE_DEFAULT' ]; then
       cmd+="$db"
     fi
+    cmd+="?authSource=admin"
     ;;
   *) ;;
   esac
