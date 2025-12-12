@@ -1,6 +1,8 @@
 # db_connect
 
-A unified command-line interface for managing and connecting to multiple database types with secure, reusable connection configurations.
+> Note. AI generated readme.
+
+A unified command-line interface for managing and connecting to multiple database types with reusable connection configurations.
 
 ## Description
 
