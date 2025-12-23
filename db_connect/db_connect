@@ -181,7 +181,9 @@ function connect() {
 
     ;;
   postgres)
-    cmd="PGPASSWORD=$pass pgcli"
+    PGPASSWORD="$pass"
+    export PGPASSWORD
+    cmd="pgcli"
     cmd+=" -h $host"
     cmd+=" -u $user"
     cmd+=" -p $port"
