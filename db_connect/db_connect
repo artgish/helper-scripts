@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 CONFIG_FILE="$HOME/.config/db_connect.yaml"
+SOPS_CONFIG_FILE="$HOME/.config/.sops.yaml"
 
 declare -A COMMAND_MAP=(
   [clickhouse]=clickhouse-client
@@ -19,9 +20,11 @@ declare -A PORT_MAP=(
 declare -A INSTAL_MAP=(
   [yq]="https://github.com/mikefarah/yq?tab=readme-ov-file#install"
   [fzy]="https://github.com/jhawthorn/fzy?tab=readme-ov-file#installation"
+  [sops]="https://github.com/getsops/sops#download"
+  [gpg]="https://www.gnupg.org/download/"
   [mycli]="https://www.mycli.net/install"
   [pgcli]="https://www.pgcli.com/install"
-  [clickhouse - client]="https://clickhouse.com/docs/install"
+  [clickhouse-client]="https://clickhouse.com/docs/install"
   [mongosh]="https://www.mongodb.com/docs/mongodb-shell/install/"
 )
 
@@ -29,22 +32,31 @@ function install_error() {
   echo "\`$1\` is not installed, install from ${INSTAL_MAP[$1]}"
 }
 
+function require_cmd() {
+  if ! command -v "$1" &>/dev/null; then
+    install_error "$1"
+    exit 1
+  fi
+}
+
 help() {
   printf "
 db_connect: keep connection configuration and connect to databases throug network
 commands:
-  init           : create config file [$CONFIG_FILE]
+  init           : create config file [%s]
   add            : add config
   show [name]    : show while config or [name]
   delete {name}  : remove the {name} from config
   connect {name} : connect to database defined in {name}
   completion     : print bash completion
   help           : print this message and exit
-supported databases: ${!PORT_MAP[*]}
-supported tools    : ${COMMAND_MAP[*]}
+supported databases: %s
+supported tools    : %s
+config is sops-encrypted with your GPG key; set SOPS_PGP_FP or be prompted on first \`init\`
 install urls:
-"
-  printf "  %s\n" ${INSTAL_MAP[@]}
+" "${CONFIG_FILE}" "${!PORT_MAP[*]}" "${COMMAND_MAP[*]}"
+
+  printf "  %s\n" "${INSTAL_MAP[@]}"
 
 }
 
@@ -72,7 +84,7 @@ function bash_completion() {
       then
         return
       else
-        readarray -t items <<< "$(yq "(. | keys)[]" "$HOME/.config/db_connect.yaml")"
+        readarray -t items <<< "$(yq "(. | keys)[] | select(. != \"sops\")" "$HOME/.config/db_connect.yaml")"
         readarray -t COMPREPLY <<< "$(compgen -W "${items[*]}" -- "${COMP_WORDS[2]}")"
       fi
   else
@@ -84,16 +96,50 @@ complete -F _complete_db_connect db_connect'
 }
 
 function init() {
-  if [ -f "$CONFIG_FILE}" ]; then
-    return
+  require_cmd yq
+  require_cmd fzy
+  require_cmd sops
+  require_cmd gpg
+
+  if ! [ -f "$SOPS_CONFIG_FILE" ]; then
+    local fp="${SOPS_PGP_FP:-}"
+    if ! [ "$fp" ]; then
+      read -rp "GPG key fingerprint to encrypt config with: " fp
+    fi
+    : "${fp:?GPG fingerprint must be set (or export SOPS_PGP_FP)}"
+    if ! gpg --list-keys "$fp" &>/dev/null; then
+      echo "GPG key \`$fp\` not found in your keyring"
+      exit 1
+    fi
+    cat > "$SOPS_CONFIG_FILE" <<EOF
+creation_rules:
+  - path_regex: db_connect.*\\.yaml$
+    pgp: "$fp"
+EOF
   fi
-  touch "$CONFIG_FILE"
-  if ! (yq --version &>/dev/null); then
-    install_error "yq"
+
+  if ! [ -f "$CONFIG_FILE" ]; then
+    echo '{}' > "$CONFIG_FILE"
+    sops encrypt -i "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
   fi
-  if ! (fzy --version &>/dev/null); then
-    install_error "fzy"
+}
+
+function decrypt_to_tmp() {
+  local tmp
+  tmp="$(mktemp --suffix=.yaml -p "$(dirname "$CONFIG_FILE")" db_connect.XXXXXX)"
+  chmod 600 "$tmp"
+  if ! sops decrypt "$CONFIG_FILE" > "$tmp"; then
+    rm -f "$tmp"
+    exit 1
   fi
+  echo "$tmp"
+}
+
+function encrypt_from_tmp() {
+  local tmp="$1"
+  sops encrypt -i "$tmp"
+  mv "$tmp" "$CONFIG_FILE"
 }
 
 function add_config() {
@@ -125,39 +171,50 @@ function add_config() {
   db="${db:-USE_DEFAULT}"
   read -rsp "Database password: " pass
   : "${pass:?Database password must be set}"
-  yq eval -i ".\"$name\".type = \"$db_type\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".host = \"$host\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".port = \"$port\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".user = \"$user\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".pass = \"$pass\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".is_srv = \"$is_srv\"" "${CONFIG_FILE}"
-  yq eval -i ".\"$name\".db = \"$db\"" "${CONFIG_FILE}"
   echo
+  local tmp
+  tmp="$(decrypt_to_tmp)"
+  trap 'rm -f "$tmp"' EXIT
+  yq eval -i ".\"$name\".type = \"$db_type\"" "$tmp"
+  yq eval -i ".\"$name\".host = \"$host\"" "$tmp"
+  yq eval -i ".\"$name\".port = \"$port\"" "$tmp"
+  yq eval -i ".\"$name\".user = \"$user\"" "$tmp"
+  yq eval -i ".\"$name\".pass = \"$pass\"" "$tmp"
+  yq eval -i ".\"$name\".is_srv = \"$is_srv\"" "$tmp"
+  yq eval -i ".\"$name\".db = \"$db\"" "$tmp"
+  encrypt_from_tmp "$tmp"
+  trap - EXIT
 }
 
 function show_config() {
   if [ "$1" ]; then
-    yq -Poy ".$1" "${CONFIG_FILE}"
+    sops decrypt "$CONFIG_FILE" | yq -Poy ".$1"
   else
-    yq -Poy "${CONFIG_FILE}"
+    sops decrypt "$CONFIG_FILE" | yq -Poy
   fi
 }
 
 function delete_config() {
-  yq eval -i "del(.$1)" "${CONFIG_FILE}"
+  local tmp
+  tmp="$(decrypt_to_tmp)"
+  trap 'rm -f "$tmp"' EXIT
+  yq eval -i "del(.$1)" "$tmp"
+  encrypt_from_tmp "$tmp"
+  trap - EXIT
 }
 
 function connect() {
-  local name db_type host is_srv port user pass db cmd
+  local name db_type host is_srv port user pass db cmd decrypted
   name="$1"
   shift
-  host="$(yq ".$name.host" "${CONFIG_FILE}")"
-  port="$(yq ".$name.port" "${CONFIG_FILE}")"
-  user="$(yq ".$name.user" "${CONFIG_FILE}")"
-  pass="$(yq ".$name.pass" "${CONFIG_FILE}")"
-  db_type="$(yq ".$name.type" "${CONFIG_FILE}")"
-  is_srv="$(yq ".$name.is_srv" "${CONFIG_FILE}")"
-  db="$(yq ".$name.db" "${CONFIG_FILE}")"
+  decrypted="$(sops decrypt "$CONFIG_FILE")"
+  host="$(yq ".$name.host" <<< "$decrypted")"
+  port="$(yq ".$name.port" <<< "$decrypted")"
+  user="$(yq ".$name.user" <<< "$decrypted")"
+  pass="$(yq ".$name.pass" <<< "$decrypted")"
+  db_type="$(yq ".$name.type" <<< "$decrypted")"
+  is_srv="$(yq ".$name.is_srv" <<< "$decrypted")"
+  db="$(yq ".$name.db" <<< "$decrypted")"
   case "${db_type}" in
   clickhouse)
     cmd="clickhouse-client"
@@ -170,7 +227,7 @@ function connect() {
     fi
     ;;
   mysql)
-    cmd="mycli --ssl"
+    cmd="mycli"
     cmd+=" -h $host"
     cmd+=" -u $user"
     cmd+=" -P $port"
