@@ -209,6 +209,14 @@ function connect() {
   local name db_type host is_srv port user pass db cmd decrypted
   name="$1"
   shift
+  if ! [ "$name" ]; then
+    echo "Usage: db_connect connect {name} [extra args...]"
+    exit 1
+  fi
+  if [ "$(yq ". | has(\"$name\")" <<< "$decrypted")" != "true" ]; then
+    echo "Config \`$name\` does not exist"
+    exit 1
+  fi
   decrypted="$(sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE")"
   host="$(yq ".$name.host" <<< "$decrypted")"
   port="$(yq ".$name.port" <<< "$decrypted")"
@@ -262,7 +270,10 @@ function connect() {
     fi
     cmd+="?authSource=admin"
     ;;
-  *) ;;
+  *)
+    echo "Unsupported database type \`$db_type\` for config \`$name\`"
+    exit 1
+    ;;
   esac
   $cmd "$@"
 }
