@@ -213,11 +213,11 @@ function connect() {
     echo "Usage: db_connect connect {name} [extra args...]"
     exit 1
   fi
+  decrypted="$(sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE")"
   if [ "$(yq ". | has(\"$name\")" <<< "$decrypted")" != "true" ]; then
     echo "Config \`$name\` does not exist"
     exit 1
   fi
-  decrypted="$(sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE")"
   host="$(yq ".$name.host" <<< "$decrypted")"
   port="$(yq ".$name.port" <<< "$decrypted")"
   user="$(yq ".$name.user" <<< "$decrypted")"
