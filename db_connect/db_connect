@@ -120,7 +120,7 @@ EOF
 
   if ! [ -f "$CONFIG_FILE" ]; then
     echo '{}' > "$CONFIG_FILE"
-    sops encrypt -i "$CONFIG_FILE"
+    sops --config "$SOPS_CONFIG_FILE" encrypt -i "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
   fi
 }
@@ -138,7 +138,7 @@ function decrypt_to_tmp() {
 
 function encrypt_from_tmp() {
   local tmp="$1"
-  sops encrypt -i "$tmp"
+  sops --config "$SOPS_CONFIG_FILE" encrypt -i "$tmp"
   mv "$tmp" "$CONFIG_FILE"
 }
 
@@ -207,7 +207,15 @@ function connect() {
   local name db_type host is_srv port user pass db cmd decrypted
   name="$1"
   shift
+  if ! [ "$name" ]; then
+    echo "Usage: db_connect connect {name} [extra args...]"
+    exit 1
+  fi
   decrypted="$(sops decrypt "$CONFIG_FILE")"
+  if [ "$(yq ". | has(\"$name\")" <<< "$decrypted")" != "true" ]; then
+    echo "Config \`$name\` does not exist"
+    exit 1
+  fi
   host="$(yq ".$name.host" <<< "$decrypted")"
   port="$(yq ".$name.port" <<< "$decrypted")"
   user="$(yq ".$name.user" <<< "$decrypted")"
@@ -260,7 +268,10 @@ function connect() {
     fi
     cmd+="?authSource=admin"
     ;;
-  *) ;;
+  *)
+    echo "Unsupported database type \`$db_type\` for config \`$name\`"
+    exit 1
+    ;;
   esac
   $cmd "$@"
 }
