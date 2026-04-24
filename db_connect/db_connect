@@ -4,7 +4,7 @@ CONFIG_FILE="$HOME/.config/db_connect.yaml"
 SOPS_CONFIG_FILE="$HOME/.config/.sops.yaml"
 
 declare -A COMMAND_MAP=(
-  [clickhouse]=clickhouse-client
+  [clickhouse]=clickhouse
   [mysql]=mycli
   [postgres]=pgcli
   [mongodb]=mongosh
@@ -24,7 +24,7 @@ declare -A INSTAL_MAP=(
   [gpg]="https://www.gnupg.org/download/"
   [mycli]="https://www.mycli.net/install"
   [pgcli]="https://www.pgcli.com/install"
-  [clickhouse-client]="https://clickhouse.com/docs/install"
+  [clickhouse]="https://clickhouse.com/docs/install"
   [mongosh]="https://www.mongodb.com/docs/mongodb-shell/install/"
 )
 
@@ -126,10 +126,12 @@ EOF
 }
 
 function decrypt_to_tmp() {
-  local tmp
-  tmp="$(mktemp --suffix=.yaml -p "$(dirname "$CONFIG_FILE")" db_connect.XXXXXX)"
+  local tmp base
+  base="$(mktemp -p "$(dirname "$CONFIG_FILE")" db_connect.XXXXXX)"
+  tmp="${base}.yaml"
+  mv "$base" "$tmp"
   chmod 600 "$tmp"
-  if ! sops decrypt "$CONFIG_FILE" > "$tmp"; then
+  if ! sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE" > "$tmp"; then
     rm -f "$tmp"
     exit 1
   fi
@@ -188,9 +190,9 @@ function add_config() {
 
 function show_config() {
   if [ "$1" ]; then
-    sops decrypt "$CONFIG_FILE" | yq -Poy ".$1"
+    sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE" | yq -Poy ".$1"
   else
-    sops decrypt "$CONFIG_FILE" | yq -Poy
+    sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE" | yq -Poy
   fi
 }
 
@@ -207,15 +209,7 @@ function connect() {
   local name db_type host is_srv port user pass db cmd decrypted
   name="$1"
   shift
-  if ! [ "$name" ]; then
-    echo "Usage: db_connect connect {name} [extra args...]"
-    exit 1
-  fi
-  decrypted="$(sops decrypt "$CONFIG_FILE")"
-  if [ "$(yq ". | has(\"$name\")" <<< "$decrypted")" != "true" ]; then
-    echo "Config \`$name\` does not exist"
-    exit 1
-  fi
+  decrypted="$(sops --config "$SOPS_CONFIG_FILE" decrypt "$CONFIG_FILE")"
   host="$(yq ".$name.host" <<< "$decrypted")"
   port="$(yq ".$name.port" <<< "$decrypted")"
   user="$(yq ".$name.user" <<< "$decrypted")"
@@ -225,7 +219,7 @@ function connect() {
   db="$(yq ".$name.db" <<< "$decrypted")"
   case "${db_type}" in
   clickhouse)
-    cmd="clickhouse-client"
+    cmd="clickhouse client"
     cmd+=" --host $host"
     cmd+=" --user $user"
     cmd+=" --port $port"
@@ -268,10 +262,7 @@ function connect() {
     fi
     cmd+="?authSource=admin"
     ;;
-  *)
-    echo "Unsupported database type \`$db_type\` for config \`$name\`"
-    exit 1
-    ;;
+  *) ;;
   esac
   $cmd "$@"
 }
