@@ -46,6 +46,7 @@ commands:
   init           : create config file [%s]
   add            : add config
   show [name]    : show while config or [name]
+  edit           : open config in $EDITOR (decrypted) and re-encrypt on save
   delete {name}  : remove the {name} from config
   connect {name} : connect to database defined in {name}
   completion     : print bash completion
@@ -70,6 +71,7 @@ function bash_completion() {
     [init]=1
     [show]=1
     [add]=1
+    [edit]=1
     [delete]=1
     [connect]=1
     [completion]=1
@@ -80,7 +82,7 @@ function bash_completion() {
     readarray -t COMPREPLY <<< "$(compgen -W "${!commands[*]}" -- "${COMP_WORDS[1]}")"
   elif [ "${COMP_CWORD}" -eq "2" ]
   then
-      if ! [ "${commands[${prev}]}" ] || [ "${prev}" == "init" ] || [ "${prev}" == "help" ]
+      if ! [ "${commands[${prev}]}" ] || [ "${prev}" == "init" ] || [ "${prev}" == "edit" ] || [ "${prev}" == "help" ]
       then
         return
       else
@@ -196,6 +198,10 @@ function show_config() {
   fi
 }
 
+function edit_config() {
+  sops --config "$SOPS_CONFIG_FILE" "$CONFIG_FILE"
+}
+
 function delete_config() {
   local tmp
   tmp="$(decrypt_to_tmp)"
@@ -293,6 +299,10 @@ add)
   init
   add_config "$2" "$3"
   ;;
+edit)
+  init
+  edit_config
+  ;;
 delete)
   init
   delete_config "$2"
@@ -307,7 +317,7 @@ connect)
   exit
   ;;
 *)
-  echo -e "\n\033[01;31mError. Command not valid. Valid values are {init|completion|show|add|delete|connect}\033[00m\n"
+  echo -e "\n\033[01;31mError. Command not valid. Valid values are {init|completion|show|add|edit|delete|connect}\033[00m\n"
   help
   exit 1
   ;;

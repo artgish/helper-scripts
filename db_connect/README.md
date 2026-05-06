@@ -201,6 +201,7 @@ db_connect delete old-dev-db
 | `init` | Initialize the configuration file and check dependencies |
 | `add` | Add a new database configuration |
 | `show [name]` | Display all configurations or a specific one |
+| `edit` | Open the decrypted config in `$EDITOR`; sops re-encrypts on save |
 | `delete <name>` | Delete a configuration |
 | `connect <name> [args]` | Connect to a database using a saved configuration |
 | `completion` | Output bash completion script |
